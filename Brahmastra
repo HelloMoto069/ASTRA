@@ -1,0 +1,318 @@
+//@version=5
+indicator("MOTO ka Brahmastra", overlay = true, max_lines_count = 500, max_labels_count = 500, max_bars_back=500 , max_boxes_count = 500)
+//------------------------------------------------------------------------------
+//Settings
+//-----------------------------------------------------------------------------{
+h2 = input.float(8.,'Bandwidth', minval = 0)
+mult = input.float(3., minval = 0)
+src = input(close, 'Source')
+
+length = input(14, 'Pivot Lookback')
+
+area = input.string('Wick Extremity', 'Swing Area', options = ['Wick Extremity', 'Full Range'])
+
+intraPrecision = input(false, 'Intrabar Precision', inline = 'intrabar')
+intrabarTf = input.timeframe('1', ''              , inline = 'intrabar')
+
+filterOptions = input.string('Count', 'Filter Areas By', options = ['Count', 'Volume'], inline = 'filter')
+filterValue   = input.float(0, ''                                            , inline = 'filter')
+
+repaint = input(true, 'Repainting Smoothing', tooltip = 'Repainting is an effect where the indicators historical output is subject to change over time. Disabling repainting will cause the indicator to output the endpoints of the calculations')
+
+//Style
+upCss = input.color(color.teal, 'Colors', inline = 'inline1', group = 'Style')
+dnCss = input.color(color.red, '', inline = 'inline1', group = 'Style')
+showTop      = input(true, 'Swing High'              , inline = 'top', group = 'Style')
+topCss       = input(color.red, ''                   , inline = 'top', group = 'Style')
+topAreaCss   = input(color.new(color.red, 50), 'Area', inline = 'top', group = 'Style')
+
+showBtm      = input(true, 'Swing Low'                , inline = 'btm', group = 'Style')
+btmCss       = input(color.teal, ''                   , inline = 'btm', group = 'Style')
+btmAreaCss   = input(color.new(color.teal, 50), 'Area', inline = 'btm', group = 'Style')
+
+labelSize = input.string('Tiny', 'Labels Size', options = ['Tiny', 'Small', 'Normal'], group = 'Style')
+
+//-----------------------------------------------------------------------------}
+//Functions
+
+n = bar_index
+
+get_data()=> [high, low, volume]
+
+[h, l, v] = request.security_lower_tf(syminfo.tickerid, intrabarTf, get_data())
+
+get_counts(condition, top, btm)=>
+    var count = 0
+    var vol = 0.
+
+    if condition
+        count := 0
+        vol := 0.
+    else
+        if intraPrecision
+            if n > length
+                if array.size(v[length]) > 0
+                    for [index, element] in v[length]
+                        vol += array.get(l[length], index) < top and array.get(h[length], index) > btm ? element : 0
+        else
+            vol += low[length] < top and high[length] > btm ? volume[length] : 0
+        
+        count += low[length] < top and high[length] > btm ? 1 : 0
+
+    [count, vol]
+
+set_label(count, vol, x, y, css, lbl_style)=>
+    var label lbl = na
+    var label_size = switch labelSize
+        'Tiny' => size.tiny
+        'Small' => size.small
+        'Normal' => size.normal
+
+    target = switch filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if ta.crossover(target, filterValue)
+        lbl := label.new(x, y, str.tostring(vol, format.volume)
+          , style = lbl_style
+          , size = label_size
+          , color = #00000000
+          , textcolor = css)
+
+    if target > filterValue
+        label.set_text(lbl, str.tostring(vol, format.volume))
+
+set_level(condition, crossed, value, count, vol, css)=>
+    var line lvl = na
+
+    target = switch filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if condition
+        if target[1] < filterValue[1]
+            line.delete(lvl[1])
+        else if not crossed[1]
+            line.set_x2(lvl, n - length)
+
+        lvl := line.new(n - length, value, n, value
+          , color = na)
+
+    if not crossed[1]
+        line.set_x2(lvl, n+3)
+    
+    if crossed and not crossed[1]
+        line.set_x2(lvl, n)
+        line.set_style(lvl, line.style_dashed)
+
+    if target > filterValue
+        line.set_color(lvl, css)
+
+set_zone(condition, x, top, btm, count, vol, css)=>
+    var box bx = na
+
+    target = switch filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if ta.crossover(target, filterValue)
+        bx := box.new(x, top, x + count, btm
+          , border_color = na
+          , bgcolor = css)
+    
+    if target > filterValue
+        box.set_right(bx, x + count)
+
+
+
+//-----------------------------------------------------------------------------}
+//Global variables
+//-----------------------------------------------------------------------------{
+//Pivot high
+var float ph_top = na
+var float ph_btm = na
+var bool  ph_crossed = na
+var       ph_x1 = 0
+var box   ph_bx = box.new(na,na,na,na
+  , bgcolor = color.new(topAreaCss, 80)
+  , border_color = na)
+
+//Pivot low
+var float pl_top = na
+var float pl_btm = na
+var bool  pl_crossed = na
+var       pl_x1 = 0
+var box   pl_bx = box.new(na,na,na,na
+  , bgcolor = color.new(btmAreaCss, 80)
+  , border_color = na)
+
+//-----------------------------------------------------------------------------}
+//Display pivot high levels/blocks
+//-----------------------------------------------------------------------------{
+ph = ta.pivothigh(length, length)
+
+//Get ph counts
+[ph_count, ph_vol] = get_counts(ph, ph_top, ph_btm)
+
+//Set ph area and level
+if ph and showTop
+    ph_top := high[length]
+    ph_btm := switch area 
+        'Wick Extremity' => math.max(close[length], open[length])
+        'Full Range' => low[length]
+    
+    ph_x1 := n - length
+    ph_crossed := false
+
+    box.set_lefttop(ph_bx, ph_x1, ph_top)
+    box.set_rightbottom(ph_bx, ph_x1, ph_btm)
+else
+    ph_crossed := close > ph_top ? true : ph_crossed
+    
+    if ph_crossed
+        box.set_right(ph_bx, ph_x1)
+    else
+        box.set_right(ph_bx, n+3)
+
+if showTop
+    //Set ph zone
+    set_zone(ph, ph_x1, ph_top, ph_btm, ph_count, ph_vol, topAreaCss)
+
+    //Set ph level
+    set_level(ph, ph_crossed, ph_top, ph_count, ph_vol, topCss)
+
+    //Set ph label
+    set_label(ph_count, ph_vol, ph_x1, ph_top, topCss, label.style_label_down)
+
+//-----------------------------------------------------------------------------}
+//Display pivot low levels/blocks
+//-----------------------------------------------------------------------------{
+pl = ta.pivotlow(length, length)
+
+//Get pl counts
+[pl_count, pl_vol] = get_counts(pl, pl_top, pl_btm)
+
+//Set pl area and level
+if pl and showBtm
+    pl_top := switch area 
+        'Wick Extremity' => math.min(close[length], open[length])
+        'Full Range' => high[length] 
+    pl_btm := low[length]
+    
+    pl_x1 := n - length
+    pl_crossed := false
+    
+    box.set_lefttop(pl_bx, pl_x1, pl_top)
+    box.set_rightbottom(pl_bx, pl_x1, pl_btm)
+else
+    pl_crossed := close < pl_btm ? true : pl_crossed
+
+    if pl_crossed
+        box.set_right(pl_bx, pl_x1)
+    else
+        box.set_right(pl_bx, n+3)
+
+if showBtm
+    //Set pl zone
+    set_zone(pl, pl_x1, pl_top, pl_btm, pl_count, pl_vol, btmAreaCss)
+    
+    //Set pl level
+    set_level(pl, pl_crossed, pl_btm, pl_count, pl_vol, btmCss)
+
+    //Set pl labels
+    set_label(pl_count, pl_vol, pl_x1, pl_btm, btmCss, label.style_label_up)
+
+//-----------------------------------------------------------------------------}
+
+
+//*******************************************
+
+
+
+
+
+
+//-----------------------------------------------------------------------------{
+//Gaussian window
+gauss(x, h2) => math.exp(-(math.pow(x, 2)/(h2 * h2 * 2)))
+
+//-----------------------------------------------------------------------------}
+//Append lines
+//-----------------------------------------------------------------------------{
+n2 = bar_index
+
+if barstate.isfirst and repaint
+    for i = 0 to 499
+        array.push(array.new_line(0) ,line.new(na,na,na,na))
+
+//-----------------------------------------------------------------------------}
+//End point method
+//-----------------------------------------------------------------------------{
+var coefs = array.new_float(0)
+var den = 0.
+
+if barstate.isfirst and not repaint
+    for i = 0 to 499
+        w = gauss(i, h2)
+        coefs.push(w)
+
+    den := coefs.sum()
+
+out = 0.
+if not repaint
+    for i = 0 to 499
+        out += src[i] * coefs.get(i)
+out /= den
+mae = ta.sma(math.abs(src - out), 499) * mult
+
+upper = out + mae
+lower = out - mae
+ 
+//-----------------------------------------------------------------------------}
+//Compute and display Brahmastra
+//-----------------------------------------------------------------------------{
+float y2 = na
+float y1 = na
+
+Brahmastra = array.new<float>(0)
+if barstate.islast and repaint
+    sae = 0.
+    //Compute and set Brahmastra point 
+    for i = 0 to math.min(499,n2 - 1)
+        sum = 0.
+        sumw = 0.
+        //Compute weighted mean 
+        for j = 0 to math.min(499,n2 - 1)
+            w = gauss(i - j, h2)
+            sum += src[j] * w
+            sumw += w
+
+        y2 := sum / sumw
+        sae += math.abs(src[i] - y2)
+        Brahmastra.push(y2)
+    
+    sae := sae / math.min(499,n2 - 1) * mult
+    for i = 0 to math.min(499,n2 - 1)
+        if i%2
+            line.new(n-i+1, y1 + sae, n2-i, Brahmastra.get(i) + sae, color = upCss)
+            line.new(n-i+1, y1 - sae, n2-i, Brahmastra.get(i) - sae, color = dnCss)
+        
+        if src[i] > Brahmastra.get(i) + sae and src[i+1] < Brahmastra.get(i) + sae
+            label.new(n2-i, src[i], '▼', color = color(na), style = label.style_label_down, textcolor = dnCss, textalign = text.align_center)
+        if src[i] < Brahmastra.get(i) - sae and src[i+1] > Brahmastra.get(i) - sae
+            label.new(n2-i, src[i], '▲', color = color(na), style = label.style_label_up, textcolor = upCss, textalign = text.align_center)
+        
+        y1 := Brahmastra.get(i)
+
+//-----------------------------------------------------------------------------}
+
+//Plot
+//-----------------------------------------------------------------------------}
+plot(repaint ? na : out + mae, 'Upper', upCss)
+plot(repaint ? na : out - mae, 'Lower', dnCss)
+
+//Crossing Arrows
+plotshape(ta.crossunder(close, out - mae) ? low : na, "Crossunder", shape.labelup, location.absolute, color(na), 0 , text = '▲', textcolor = upCss, size = size.tiny)
+plotshape(ta.crossover(close, out + mae) ? high : na, "Crossover", shape.labeldown, location.absolute, color(na), 0 , text = '▼', textcolor = dnCss, size = size.tiny)
+
+//-----------------------------------------------------------------------------}
