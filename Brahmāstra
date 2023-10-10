@@ -1,0 +1,105 @@
+//@version=5
+indicator("Brahmāstra", shorttitle="Brahmāstra", overlay=true)
+
+// Input for the EMA length
+ema_length = 10
+
+// Calculate EMA
+ema = ta.ema(close, ema_length)
+
+// Determine if the candle is red and completely above EMA
+is_red_candle_above_ema = (close < open) and (low > ema)
+// *****************
+is_green_candle_below_ema = (close > open) and (high < ema)
+
+
+// Initialize a variable to keep track of the last marked red candle's high
+var float lastMarkedRedHigh = na
+// *****************
+var float lastMarkedGreenLow = na
+
+
+// Track the conditions for the previous candles
+var bool isPrevGreenOpenBelowEMA = na 
+var bool isPrevRedCloseBelowEMA = na
+var bool isPrevCandleGreen = na
+// *****************
+var bool isPrevRedOpenAboveEMA = na
+var bool isPrevGreenCloseAboveEMA = na
+var bool isPrevCandleRed = na
+
+// Check if the current green candle crosses and closes above the last marked red candle
+is_green_candle_above_red = (close > lastMarkedRedHigh) and (open < lastMarkedRedHigh) and (close > open)
+// *****************
+is_red_candle_below_green = (close < lastMarkedGreenLow) and (open > lastMarkedGreenLow) and (close < open)
+
+
+// Check if the exact previous green candle's open is below EMA (LONG)
+if (open[1] < ema[1])
+    isPrevGreenOpenBelowEMA := true
+else
+    isPrevGreenOpenBelowEMA := false
+// *****************
+if (open[1] > ema[1])
+    isPrevRedOpenAboveEMA := true
+else
+    isPrevRedOpenAboveEMA := false
+
+// Check if the exact previous red candle's close is below EMA (LONG)
+if (close[1] < ema[1])
+    isPrevRedCloseBelowEMA := true
+else
+    isPrevRedCloseBelowEMA := false
+// *****************
+if (close[1] > ema[1])
+    isPrevGreenCloseAboveEMA := true
+else
+    isPrevGreenCloseAboveEMA := false
+
+
+// Check if the exact previous candle is green (LONG)
+if (close[1] > open[1])
+    isPrevCandleGreen := true
+else
+    isPrevCandleGreen := false
+
+if (isPrevCandleGreen)
+    if (high[2] == lastMarkedRedHigh)
+        isPrevCandleGreen := false
+        isPrevGreenOpenBelowEMA := false
+    if (high[3] == lastMarkedRedHigh)
+        isPrevCandleGreen := false
+        isPrevGreenOpenBelowEMA := false
+// *****************
+if (close[1] < open[1])
+    isPrevCandleRed := true
+else
+    isPrevCandleRed := false
+
+if (isPrevCandleRed)
+    if (low[2] == lastMarkedGreenLow)
+        isPrevCandleRed := false
+        isPrevRedOpenAboveEMA := false
+    if (low[3] == lastMarkedGreenLow)
+        isPrevCandleRed := false   
+        isPrevRedOpenAboveEMA := false 
+
+
+// Update the last marked red candle's high when a new one is marked (LONG)
+if is_red_candle_above_ema
+    lastMarkedRedHigh := high
+// *****************
+if is_green_candle_below_ema
+    lastMarkedGreenLow := low
+
+// Plot shapes to highlight red and green candles (LONG)
+plotshape(is_red_candle_above_ema, style=shape.cross, location=location.belowbar, color=color.red, size=size.tiny)
+plotshape((isPrevGreenOpenBelowEMA or isPrevRedCloseBelowEMA or isPrevCandleGreen) ? na : is_green_candle_above_red, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+// *****************
+plotshape(is_green_candle_below_ema, style=shape.cross, location=location.abovebar, color=color.green, size=size.tiny)
+plotshape((isPrevRedOpenAboveEMA or isPrevGreenCloseAboveEMA or isPrevCandleRed) ? na : is_red_candle_below_green, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+
+// Plot the EMA on the chart
+plot(ema, title="Stop Loss (SL)", color=color.blue)
+
