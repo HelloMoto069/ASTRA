@@ -1,7 +1,7 @@
 //@version=5
 indicator("Brahmāstra", shorttitle="Brahmāstra", overlay=true)
 
-// Input for the EMA length
+// Input for the EMA length by taking default
 ema_length = 10
 
 // Calculate EMA
