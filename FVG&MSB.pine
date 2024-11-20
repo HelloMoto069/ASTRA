@@ -1,0 +1,156 @@
+//@version=5
+indicator("FVG and MSB", overlay=true, max_lines_count=500, max_bars_back=4900, max_boxes_count=500)
+
+// FAIR VALUE GAP Settings
+show_fvg = input(false, 'Fair Value Gaps', group='Fair Value Gaps', tooltip='Display fair values gaps on the chart')
+fvg_auto = input(true, "Auto Threshold", group='Fair Value Gaps', tooltip='Filter out non significant fair value gaps')
+fvg_tf = input.timeframe('', "Timeframe", group='Fair Value Gaps', tooltip='Fair value gaps timeframe')
+bull_fvg_css = input.color(color.new(#00ff68, 70), 'Bullish FVG', group='Fair Value Gaps')
+bear_fvg_css = input.color(color.new(#ff0008, 70), 'Bearish FVG', group='Fair Value Gaps')
+fvg_extend = input.int(1, "Extend FVG", minval=0, group='Fair Value Gaps', tooltip='Determine how many bars to extend the Fair Value Gap boxes on chart')
+
+// Market Structure Break Settings
+zigzag_len = input.int(9, "ZigZag Length", group="Market Structure Break")
+show_zigzag = input.bool(true, "Show Zigzag", group="Market Structure Break")
+fib_factor = input.float(0.273, "Fib Factor for breakout confirmation", 0, 1, 0.01, group="Market Structure Break")
+text_size = input.string(size.tiny, "Text Size", [size.tiny, size.small, size.normal, size.large, size.huge], group="Market Structure Break")
+
+// FAIR VALUE GAP Code
+var bullish_fvg_max = array.new_box(0)
+var bullish_fvg_min = array.new_box(0)
+var bearish_fvg_max = array.new_box(0)
+var bearish_fvg_min = array.new_box(0)
+float bullish_fvg_avg = na
+float bearish_fvg_avg = na
+bullish_fvg_cnd = false
+bearish_fvg_cnd = false
+
+[src_c1, src_o1, src_h, src_l, src_h2, src_l2] = request.security(syminfo.tickerid, fvg_tf, [close[1], open[1], high, low, high[2], low[2]])
+
+if show_fvg
+    delta_per = (src_c1 - src_o1) / src_o1 * 100
+    change_tf = timeframe.change(fvg_tf)
+    threshold = fvg_auto ? ta.cum(math.abs(change_tf ? delta_per : 0)) / bar_index * 2 : 0
+    bullish_fvg_cnd := src_l > src_h2 and src_c1 > src_h2 and delta_per > threshold and change_tf
+    bearish_fvg_cnd := src_h < src_l2 and src_c1 < src_l2 and -delta_per > threshold and change_tf
+
+    if bullish_fvg_cnd
+        array.unshift(bullish_fvg_max, box.new(bar_index - 1, src_l, bar_index + fvg_extend, math.avg(src_l, src_h2), border_color = bull_fvg_css, bgcolor = bull_fvg_css))
+        array.unshift(bullish_fvg_min, box.new(bar_index - 1, math.avg(src_l, src_h2), bar_index + fvg_extend, src_h2, border_color = bull_fvg_css, bgcolor = bull_fvg_css))
+    
+    if bearish_fvg_cnd
+        array.unshift(bearish_fvg_max, box.new(bar_index - 1, src_h, bar_index + fvg_extend, math.avg(src_h, src_l2), border_color = bear_fvg_css, bgcolor = bear_fvg_css))
+        array.unshift(bearish_fvg_min, box.new(bar_index - 1, math.avg(src_h, src_l2), bar_index + fvg_extend, src_l2, border_color = bear_fvg_css, bgcolor = bear_fvg_css))
+
+    for bx in bullish_fvg_min
+        if low < box.get_bottom(bx)
+            box.delete(bx)
+            box.delete(array.get(bullish_fvg_max, array.indexof(bullish_fvg_min, bx)))
+    
+    for bx in bearish_fvg_max
+        if high > box.get_top(bx)
+            box.delete(bx)
+            box.delete(array.get(bearish_fvg_min, array.indexof(bearish_fvg_max, bx)))
+
+// Market Structure Break Code
+var float[] high_points_arr = array.new_float(5)
+var int[] high_index_arr = array.new_int(5)
+var float[] low_points_arr = array.new_float(5)
+var int[] low_index_arr = array.new_int(5)
+var box[] bu_ob_boxes = array.new_box(5)
+var box[] be_ob_boxes = array.new_box(5)
+var box[] bu_bb_boxes = array.new_box(5)
+var box[] be_bb_boxes = array.new_box(5)
+
+to_up = high >= ta.highest(zigzag_len)
+to_down = low <= ta.lowest(zigzag_len)
+trend = 1
+trend := nz(trend[1], 1)
+trend := trend == 1 and to_down ? -1 : trend == -1 and to_up ? 1 : trend
+
+last_trend_up_since = ta.barssince(to_up[1])
+low_val = ta.lowest(nz(last_trend_up_since > 0 ? last_trend_up_since : 1, 1))
+low_index = bar_index - ta.barssince(low_val == low)
+
+last_trend_down_since = ta.barssince(to_down[1])
+high_val = ta.highest(nz(last_trend_down_since > 0 ? last_trend_down_since : 1, 1))
+high_index = bar_index - ta.barssince(high_val == high)
+
+if ta.change(trend) != 0
+    if trend == 1
+        array.push(low_points_arr, low_val)
+        array.push(low_index_arr, low_index)
+    if trend == -1
+        array.push(high_points_arr, high_val)
+        array.push(high_index_arr, high_index)
+
+f_get_high(ind) =>
+    [array.get(high_points_arr, array.size(high_points_arr) - 1 - ind), array.get(high_index_arr, array.size(high_index_arr) - 1 - ind)]
+
+f_get_low(ind) =>
+    [array.get(low_points_arr, array.size(low_points_arr) - 1 - ind), array.get(low_index_arr, array.size(low_index_arr) - 1 - ind)]
+
+[h0, h0i] = f_get_high(0)
+[h1, h1i] = f_get_high(1)
+[l0, l0i] = f_get_low(0)
+[l1, l1i] = f_get_low(1)
+
+if ta.change(trend) != 0 and show_zigzag
+    if trend == 1
+        line.new(h0i, h0, l0i, l0)
+    if trend == -1
+        line.new(l0i, l0, h0i, h0)
+
+market = 1
+market := nz(market[1], 1)
+last_l0 = ta.valuewhen(ta.change(market) != 0, l0, 0)
+last_h0 = ta.valuewhen(ta.change(market) != 0, h0, 0)
+market := last_l0 == l0 or last_h0 == h0 ? market : market == 1 and l0 < l1 and l0 < l1 - math.abs(h0 - l1) * fib_factor ? -1 : market == -1 and h0 > h1 and h0 > h1 + math.abs(h1 - l0) * fib_factor ? 1 : market
+
+bu_ob_index = bar_index
+bu_ob_index := nz(bu_ob_index[1], bar_index)
+for i=h1i to l0i[zigzag_len]
+    index = bar_index - i 
+    if open[index] > close[index]
+        bu_ob_index := bar_index[index]
+
+bu_ob_since = bar_index - bu_ob_index
+
+be_ob_index = bar_index
+be_ob_index := nz(be_ob_index[1], bar_index)
+for i=l1i to h0i[zigzag_len]
+    index = bar_index - i 
+    if open[index] < close[index]
+        be_ob_index := bar_index[index]
+
+be_ob_since = bar_index - be_ob_index
+
+be_bb_index = bar_index
+be_bb_index := nz(be_bb_index[1], bar_index)
+for i=h1i - zigzag_len to l1i
+    index = bar_index - i
+    if open[index] > close[index]
+        be_bb_index := bar_index[index]
+
+be_bb_since = bar_index - be_bb_index
+
+bu_bb_index = bar_index
+bu_bb_index := nz(bu_bb_index[1], bar_index)
+for i=l1i - zigzag_len to h1i
+    index = bar_index - i
+    if open[index] < close[index]
+        bu_bb_index := bar_index[index]
+
+bu_bb_since = bar_index - bu_bb_index
+
+if ta.change(market) != 0
+    if market == 1
+        line.new(h1i, h1, h0i, h1, color=color.green, width=2)
+        label.new(int(math.avg(h1i, l0i)), h1, "MSB", color=color.new(color.black, 100), style=label.style_label_down, textcolor=color.green, size=size.small)
+    if market == -1
+        line.new(l1i, l1, l0i, l1, color=color.red, width=2)
+        label.new(int(math.avg(l1i, h0i)), l1, "MSB", color=color.new(color.black, 100), style=label.style_label_up, textcolor=color.red, size=size.small)
+
+alertcondition(bullish_fvg_cnd, 'Bullish FVG', 'Bullish FVG formed')
+alertcondition(bearish_fvg_cnd, 'Bearish FVG', 'Bearish FVG formed')
+alertcondition(ta.change(market) != 0, "MSB", "MSB")
